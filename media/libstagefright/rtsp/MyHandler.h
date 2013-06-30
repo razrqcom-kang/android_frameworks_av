@@ -422,6 +422,9 @@ struct MyHandler : public AHandler {
 
                     if (response->mStatusCode != 200) {
                         result = UNKNOWN_ERROR;
+                    } else if (response->mContent == NULL) {
+                        result = ERROR_MALFORMED;
+                        ALOGE("The response has no content.");
                     } else {
                         mSessionDesc = new ASessionDescription;
 
@@ -1091,6 +1094,10 @@ struct MyHandler : public AHandler {
 
     void parsePlayResponse(const sp<ARTSPResponse> &response) {
         mSeekable = false;
+        if (mTracks.size() == 0) {
+            ALOGV("parsePlayResponse: late packets ignored.");
+            return;
+        }
 
         ssize_t i = response->mHeaders.indexOfKey("range");
         if (i < 0) {

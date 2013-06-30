@@ -312,7 +312,7 @@ status_t MediaPlayerService::AudioCache::dump(int fd, const Vector<String16>& ar
                 mHeap->getBase(), mHeap->getSize(), mHeap->getFlags(), mHeap->getDevice());
         result.append(buffer);
     }
-    snprintf(buffer, 255, "  msec per frame(%f), channel count(%d), format(%d), frame count(%ld)\n",
+    snprintf(buffer, 255, "  msec per frame(%f), channel count(%d), format(%d), frame count(%zd)\n",
             mMsecsPerFrame, mChannelCount, mFormat, mFrameCount);
     result.append(buffer);
     snprintf(buffer, 255, "  sample rate(%d), size(%d), error(%d), command complete(%s)\n",
@@ -526,8 +526,8 @@ void MediaPlayerService::Client::disconnect()
     {
         Mutex::Autolock l(mLock);
         p = mPlayer;
+        mClient.clear();
     }
-    mClient.clear();
 
     mPlayer.clear();
 
