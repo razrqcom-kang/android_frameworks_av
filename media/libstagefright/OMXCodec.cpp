@@ -1,9 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2010 - 2013, The Linux Foundation. All rights reserved.
- *
- * Not a Contribution, Apache license notifications and license are retained
- * for attribution purposes only.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -276,7 +272,6 @@ void OMXCodec::findMatchingCodecs(
         const char *componentName = list->getCodecName(matchIndex);
 
         // If a specific codec is requested, skip the non-matching ones.
-        ALOGV("matchComponentName %s ",matchComponentName);
         if (matchComponentName && strcmp(componentName, matchComponentName)) {
             continue;
         }
@@ -452,36 +447,16 @@ sp<MediaSource> OMXCodec::Create(
 
         sp<MediaSource> softwareCodec;
         if (createEncoder) {
-            softwareCodec = InstantiateSoftwareEncoder(componentName, source, meta);
-        } else {
-            softwareCodec = InstantiateSoftwareDecoder(componentName, source);
-        }
-        if (softwareCodec != NULL) {
-            ALOGE("Successfully allocated software codec '%s'", componentName);
-            return softwareCodec;
-        }
-#ifdef QCOM_HARDWARE
-        //quirks = getComponentQuirks(componentNameBase, createEncoder);
-        if(quirks & kRequiresWMAProComponent)
-        {
-           int32_t version;
-           CHECK(meta->findInt32(kKeyWMAVersion, &version));
-           if(version==kTypeWMA)
-           {
-              componentName = "OMX.qcom.audio.decoder.wma";
-           }
-           else if(version==kTypeWMAPro)
-           {
-              componentName= "OMX.qcom.audio.decoder.wma10Pro";
-           }
-           else if(version==kTypeWMALossLess)
-           {
-              componentName= "OMX.qcom.audio.decoder.wmaLossLess";
-           }
+            sp<MediaSource> softwareCodec =
+                InstantiateSoftwareEncoder(componentName, source, meta);
+
+            if (softwareCodec != NULL) {
+                ALOGV("Successfully allocated software codec '%s'", componentName);
+
+                return softwareCodec;
+            }
         }
 
-        QCOMXCodec::setASFQuirks(quirks, meta, componentName);
-#endif
         ALOGV("Attempting to allocate OMX node '%s'", componentName);
 
         if (!createEncoder
@@ -1034,7 +1009,7 @@ status_t OMXCodec::isColorFormatSupported(
         // the incremented index (bug 2897413).
         CHECK_EQ(index, portFormat.nIndex);
         if (portFormat.eColorFormat == colorFormat) {
-            CODEC_LOGE("Found supported color format: %d", portFormat.eColorFormat);
+            CODEC_LOGV("Found supported color format: %d", portFormat.eColorFormat);
             return OK;  // colorFormat is supported!
         }
         ++index;
@@ -1306,7 +1281,7 @@ status_t OMXCodec::setupH263EncoderParameters(const sp<MetaData>& meta) {
 #ifdef QCOM_HARDWARE
     QCUtilityClass::helper_OMXCodec_hfr(meta, frameRate, bitRate, newFrameRate);
 #endif
-    h263type.nPFrames = setPFramesSpacing(iFramesInterval, newFrameRate);
+h263type.nPFrames = setPFramesSpacing(iFramesInterval, frameRate);
     if (h263type.nPFrames == 0) {
         h263type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
     }
@@ -1361,7 +1336,7 @@ status_t OMXCodec::setupMPEG4EncoderParameters(const sp<MetaData>& meta) {
 #ifdef QCOM_HARDWARE
     QCUtilityClass::helper_OMXCodec_hfr(meta, frameRate, bitRate, newFrameRate);
 #endif
-    mpeg4type.nPFrames = setPFramesSpacing(iFramesInterval, newFrameRate);
+    mpeg4type.nPFrames = setPFramesSpacing(iFramesInterval, frameRate);
     if (mpeg4type.nPFrames == 0) {
         mpeg4type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
     }
@@ -1435,7 +1410,7 @@ status_t OMXCodec::setupAVCEncoderParameters(const sp<MetaData>& meta) {
     if (h264type.eProfile != OMX_VIDEO_AVCProfileBaseline) {
 #endif
         ALOGW("Use baseline profile instead of %d for AVC recording",
-                h264type.eProfile);
+            h264type.eProfile);
         h264type.eProfile = OMX_VIDEO_AVCProfileBaseline;
     }
 #endif
@@ -2155,10 +2130,8 @@ status_t OMXCodec::allocateOutputBuffersFromNativeWindow() {
     }
 
     ALOGV("native_window_set_usage usage=0x%lx", usage);
-
     err = native_window_set_usage(
             mNativeWindow.get(), usage | GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_EXTERNAL_DISP);
-
     if (err != 0) {
         ALOGE("native_window_set_usage failed: %s (%d)", strerror(-err), -err);
         return err;
@@ -3098,12 +3071,13 @@ void OMXCodec::onStateChange(OMX_STATETYPE newState) {
                              -err);
                     }
 #endif
-                    if (mFlags & kEnableGrallocUsageProtected) {
-                        // We push enough 1x1 blank buffers to ensure that one of
-                        // them has made it to the display.  This allows the OMX
-                        // component teardown to zero out any protected buffers
-                        // without the risk of scanning out one of those buffers.
-                        pushBlankBuffersToNativeWindow();
+                if ((mFlags & kEnableGrallocUsageProtected) &&
+                        mNativeWindow != NULL) {
+                    // We push enough 1x1 blank buffers to ensure that one of
+                    // them has made it to the display.  This allows the OMX
+                    // component teardown to zero out any protected buffers
+                    // without the risk of scanning out one of those buffers.
+                    pushBlankBuffersToNativeWindow();
                     }
                 }
 
@@ -3266,14 +3240,14 @@ bool OMXCodec::flushPortAsync(OMX_U32 portIndex) {
              portIndex, countBuffersWeOwn(mPortBuffers[portIndex]),
              mPortBuffers[portIndex].size());
 
-        CHECK_EQ((int)mPortStatus[portIndex], (int)ENABLED);
-        mPortStatus[portIndex] = SHUTTING_DOWN;
+    CHECK_EQ((int)mPortStatus[portIndex], (int)ENABLED);
+    mPortStatus[portIndex] = SHUTTING_DOWN;
 
-        if ((mQuirks & kRequiresFlushCompleteEmulation)
-            && countBuffersWeOwn(mPortBuffers[portIndex])
-                    == mPortBuffers[portIndex].size()) {
-            // No flush is necessary and this component fails to send a
-            // flush-complete event in this case.
+    if ((mQuirks & kRequiresFlushCompleteEmulation)
+        && countBuffersWeOwn(mPortBuffers[portIndex])
+                == mPortBuffers[portIndex].size()) {
+        // No flush is necessary and this component fails to send a
+        // flush-complete event in this case.
 
            return false;
         }
@@ -4472,12 +4446,12 @@ status_t OMXCodec::stopOmxComponent_l() {
                     bool emulateInputFlushCompletion =
                         !flushPortAsync(kPortIndexInput);
 
-                    bool emulateOutputFlushCompletion =
-                        !flushPortAsync(kPortIndexOutput);
+                bool emulateOutputFlushCompletion =
+                    !flushPortAsync(kPortIndexOutput);
 
-                    if (emulateInputFlushCompletion) {
-                        onCmdComplete(OMX_CommandFlush, kPortIndexInput);
-                    }
+                if (emulateInputFlushCompletion) {
+                    onCmdComplete(OMX_CommandFlush, kPortIndexInput);
+                }
 
                     if (emulateOutputFlushCompletion) {
                         onCmdComplete(OMX_CommandFlush, kPortIndexOutput);
